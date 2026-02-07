@@ -24,16 +24,16 @@ public class Main {
             }
         }
         // Arranca el servidor
-        new Main();
+        new Main(port);
     }
 
-    public Main() throws IOException {
+    public Main(int port) throws IOException {
 
         // 1) Creamos el "puerto" donde el servidor se queda escuchando conexiones.
         //    Cualquier cliente que vaya a http://localhost:5001 intentará conectarse aquí.
-        ServerSocket serverSocket = new ServerSocket(5001);
+        ServerSocket serverSocket = new ServerSocket(port);
 
-        System.out.println("Server ON. Waiting for connections on port 5001...");
+        System.out.println("Server ON. Waiting for connections on port" + port + "...");
 
         // 2) "Conexión constante" del servidor:
         //    Este while(true) significa: "nunca dejes de aceptar clientes".
