@@ -104,68 +104,39 @@ public class Main {
                 //    Nota: El navegador puede cerrar cuando quiera. Si la cierra, readLine() da null.
                 while (true) {
 
-                    // 4) La primera línea del request HTTP suele ser:
-                    //    GET / HTTP/1.1
-                    //    o
-                    //    GET /algo HTTP/1.1
-                    //
-                    //    Si el cliente cerró la conexión, readLine() devuelve null.
+
                     String requestLine = br.readLine();
 
                     if (requestLine == null) {
-                        // Significa: el cliente cerró la conexión.
-                        System.out.println("Client disconnected: " + socket.getInetAddress());
-                        break; // salimos del while del cliente
+                        socket.close();
+                        return;
                     }
 
-                    // 5) Imprimimos la línea principal del request para ver qué pidió el cliente.
                     System.out.println("\n--- REQUEST START (" + socket.getInetAddress() + ") ---");
                     System.out.println(requestLine);
 
-                    // 6) Después de la primera línea, vienen los headers, por ejemplo:
-                    //    Host: localhost:5001
-                    //    User-Agent: ...
-                    //    Accept: ...
-                    //
-                    //    En HTTP, los headers terminan cuando aparece una LÍNEA VACÍA.
+
                     String headerLine;
                     while ((headerLine = br.readLine()) != null && !headerLine.isEmpty()) {
                         System.out.println(headerLine);
                     }
                     System.out.println("--- REQUEST END ---\n");
 
-                    // 7) Ahora respondemos.
-                    //    El navegador espera un response HTTP con:
-                    //    - Status line: HTTP/1.1 200 OK
-                    //    - Headers
-                    //    - Línea vacía
-                    //    - Body (HTML)
-                    //
-                    //    Vamos a armar un body sencillo:
                     String body = "<html><body>Hola Mundo</body></html>";
-
-                    // 8) Escribimos el response.
-                    //    OJO: Si no mandas Content-Length, algunos clientes igual funcionan,
-                    //    pero otros pueden quedarse esperando. Aquí lo mandamos para que sea más “formal”.
-                    //
-                    //    Content-Length debe ser la cantidad de bytes del body.
-                    //    (En ASCII simple coincide con caracteres, pero en general es bytes.)
                     int contentLength = body.getBytes().length;
 
                     bw.write("HTTP/1.1 200 OK\r\n");                     // línea de estado
                     bw.write("Content-type: text/html\r\n");            // tipo de contenido
                     bw.write("Content-Length: " + contentLength + "\r\n"); // tamaño del body
-                    bw.write("Connection: keep-alive\r\n");             // le decimos: mantén conexión
+                    bw.write("Connection: close\r\n");             // le decimos: mantén conexión
                     bw.write("\r\n");                                   // línea vacía: fin headers
                     bw.write(body);                                     // body HTML
                     bw.flush();                                         // IMPORTANTÍSIMO: envía todo
 
-                    // 9) Gracias al while(true) del cliente, NO cerramos aún.
-                    //    El cliente puede volver a mandar otra petición en la misma conexión.
+                    socket.close();
                 }
 
-                // 10) Cuando salimos del while (cliente cerró), cerramos el socket.
-                socket.close();
+
 
             } catch (IOException e) {
                 // Si hay error con ESE cliente, no tumbamos el servidor completo.
