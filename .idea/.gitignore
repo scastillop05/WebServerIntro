@@ -1,0 +1,14 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+
+# IntelliJ IDEA
+.idea/
+*.iml
+
+# Java
+*.class
+out/
+
+# Mac
+.DS_Store
