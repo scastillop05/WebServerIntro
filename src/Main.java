@@ -2,18 +2,30 @@ import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 
+/**
+ * Mini servidor web básico:
+ * - TCP con ServerSocket/Socket
+ * - Concurrencia (un hilo por solicitud: 1 request por conexión)
+ * - Lectura de request HTTP (línea + headers)
+ * - Respuestas HTTP válidas (CRLF)
+ * - Servir archivos: HTML, JPG, GIF + MIME correcto
+ * - 404 con página de error desde archivo
+ * - Cierre correcto de recursos (try-with-resources)
+ */
 public class Main {
 
     public static void main(String[] args) throws IOException {
 
-        int port = 5001; // puerto por defecto
+        // Puerto por defecto
+        int port = 5001;
 
-        // si el usuario pasó un puerto por consola, intentamos usarlo
+        // Si pasan un puerto por consola, intentamos usarlo:
+        // Ej: java Main 8080
         if (args.length > 0) {
             try {
                 int candidate = Integer.parseInt(args[0]);
 
-                // regla del enunciado: debe ser mayor a 1024
+                // Regla del enunciado: puerto > 1024 y dentro del rango válido
                 if (candidate > 1024 && candidate <= 65535) {
                     port = candidate;
                 } else {
@@ -23,56 +35,47 @@ public class Main {
                 System.out.println("El puerto debe ser un número. Usando 5001.");
             }
         }
-        // Arranca el servidor
+
+        // Arranca el servidor con el puerto ya definido
         new Main(port);
     }
 
     public Main(int port) throws IOException {
 
-        // 1) Creamos el "puerto" donde el servidor se queda escuchando conexiones.
-        //    Cualquier cliente que vaya a http://localhost:5001 intentará conectarse aquí.
+        // ServerSocket = “puerto” donde el servidor escucha conexiones TCP
         ServerSocket serverSocket = new ServerSocket(port);
 
-        System.out.println("Server ON. Waiting for connections on port" + port + "...");
+        System.out.println("Server ON. Waiting for connections on port " + port + "...");
 
-        // 2) "Conexión constante" del servidor:
-        //    Este while(true) significa: "nunca dejes de aceptar clientes".
-        //    Si NO está este while, tu servidor atiende SOLO un cliente y ya.
+        // Servidor “continuo”: nunca deja de aceptar clientes
         while (true) {
 
-            // 3) accept() se queda BLOQUEADO esperando un cliente.
-            //    - Cuando alguien entra desde el navegador, accept() devuelve un Socket.
-            //    - Ese Socket representa la conexión con ESE cliente en específico.
+            // accept() se queda bloqueado hasta que alguien se conecte
             Socket socket = serverSocket.accept();
 
             System.out.println("New client connected: " + socket.getInetAddress());
 
-            // 4) Multi-hilos:
-            //    Para que el servidor pueda atender a MUCHOS clientes a la vez,
-            //    no atendemos al cliente aquí mismo.
-            //    En su lugar, creamos un hilo para ese cliente.
-            //
-            //    El hilo ejecuta el método run() de ClientHandler.
+            // Multi-hilos:
+            // Por cada conexión (que en nuestro caso equivale a 1 request),
+            // creamos un hilo que atiende al cliente y responde.
             ClientHandler handler = new ClientHandler(socket);
             Thread thread = new Thread(handler);
-
-            // 5) start() arranca el hilo.
-            //    IMPORTANTE:
-            //    - start() crea un hilo nuevo y llama run() por debajo.
-            //    - si llamaras run() directamente, NO sería multi-hilo (se ejecuta en el mismo hilo).
             thread.start();
 
-            // 6) Volvemos al inicio del while(true) para aceptar otro cliente.
-            //    Mientras tanto, el cliente anterior sigue siendo atendido por su hilo.
+            // El hilo principal vuelve a accept() para aceptar el siguiente cliente.
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Esta clase atiende 1 SOLO cliente (1 Socket) en un hilo aparte.
-    // -------------------------------------------------------------------------
+    /**
+     * Atiende a 1 cliente en un hilo separado.
+     * En este servidor implementamos “1 request por conexión”:
+     * - Leemos una request line
+     * - Leemos headers
+     * - Respondemos
+     * - Cerramos (automático con try-with-resources)
+     */
     static class ClientHandler implements Runnable {
 
-        // Guardamos el socket del cliente para poder leer y escribir con ese cliente.
         private final Socket socket;
 
         ClientHandler(Socket socket) {
@@ -81,38 +84,56 @@ public class Main {
 
         @Override
         public void run() {
-            try {
-                InputStream is = socket.getInputStream();
-                OutputStream os = socket.getOutputStream();
 
-                BufferedReader br = new BufferedReader(new InputStreamReader(is));
-                BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(os));
+            // try-with-resources: todo lo declarado aquí se cierra automáticamente
+            // al salir del bloque (incluso si hay excepción).
+            try (
+                    Socket client = socket;
+                    InputStream is = client.getInputStream();
+                    OutputStream os = client.getOutputStream();
+                    BufferedReader br = new BufferedReader(new InputStreamReader(is));
+                    BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(os))
+            ) {
 
-                // 1) Leer request line (una sola solicitud)
+                // =========================
+                // 1) Leer la request line
+                // =========================
+                // Ejemplos:
+                //   GET / HTTP/1.1
+                //   GET /index.html HTTP/1.1
                 String requestLine = br.readLine();
+
+                // Si viene null, el cliente cerró sin enviar nada
                 if (requestLine == null) {
-                    socket.close();
                     return;
                 }
 
                 System.out.println("\n--- REQUEST START (" + socket.getInetAddress() + ") ---");
                 System.out.println(requestLine);
 
-                // 2) Leer y mostrar headers (hasta línea vacía)
+                // =========================
+                // 2) Leer y mostrar headers
+                // =========================
+                // HTTP termina headers con una línea vacía
                 String headerLine;
                 while ((headerLine = br.readLine()) != null && !headerLine.isEmpty()) {
                     System.out.println(headerLine);
                 }
                 System.out.println("--- REQUEST END ---\n");
 
-                // 3) Parsear request line
+                // =========================
+                // 3) Parsear la request line
+                // =========================
+                // Request line: METHOD PATH VERSION
+                // Ej: GET /hola.html HTTP/1.1
                 String[] parts = requestLine.split(" ");
+
+                // Si no tiene al menos 3 partes => request mal formada
                 if (parts.length < 3) {
                     bw.write("HTTP/1.0 400 Bad Request\r\n");
                     bw.write("Connection: close\r\n");
                     bw.write("\r\n");
                     bw.flush();
-                    socket.close();
                     return;
                 }
 
@@ -120,15 +141,16 @@ public class Main {
                 String path = parts[1];
                 String version = parts[2];
 
+                // Solo permitimos GET (como pide el enunciado)
                 if (!method.equals("GET")) {
                     bw.write("HTTP/1.0 405 Method Not Allowed\r\n");
                     bw.write("Connection: close\r\n");
                     bw.write("\r\n");
                     bw.flush();
-                    socket.close();
                     return;
                 }
 
+                // Si piden "/" servimos index.html
                 if (path.equals("/")) {
                     path = "/index.html";
                 }
@@ -137,13 +159,18 @@ public class Main {
                 System.out.println("PATH   = " + path);
                 System.out.println("HTTP   = " + version);
 
-                // 4) Buscar archivo dentro de www
+                // =========================
+                // 4) Mapear path -> archivo
+                // =========================
+                // Todo sale de la carpeta "www"
+                // Ej: /hola.html => www/hola.html
                 String filePath = "www" + path;
                 File file = new File(filePath);
 
-                // AQUÍ detectas el MIME
+                // =========================
+                // 5) Detectar MIME (Content-Type)
+                // =========================
                 String contentType;
-
                 if (path.endsWith(".html") || path.endsWith(".htm")) {
                     contentType = "text/html";
                 } else if (path.endsWith(".jpg") || path.endsWith(".jpeg")) {
@@ -151,25 +178,28 @@ public class Main {
                 } else if (path.endsWith(".gif")) {
                     contentType = "image/gif";
                 } else {
+                    // Tipo genérico para extensiones que no soportamos explícitamente
                     contentType = "application/octet-stream";
                 }
 
                 System.out.println("MIME   = " + contentType);
 
+                // =========================
+                // 6) Si no existe => 404 con archivo www/404.html
+                // =========================
                 if (!file.exists() || file.isDirectory()) {
 
                     File errorFile = new File("www/404.html");
 
-                    // Si el archivo 404.html existe, lo leemos; si no, usamos un fallback
+                    // fallback por si 404.html no existe
                     String errorBody = "<html><body><h1>404 Not Found</h1></body></html>";
 
+                    // Si existe el 404.html, lo cargamos
                     if (errorFile.exists() && !errorFile.isDirectory()) {
                         BufferedReader fr = new BufferedReader(new FileReader(errorFile));
                         StringBuilder sb = new StringBuilder();
                         String l;
-                        while ((l = fr.readLine()) != null) {
-                            sb.append(l).append("\n");
-                        }
+                        while ((l = fr.readLine()) != null) sb.append(l).append("\n");
                         fr.close();
                         errorBody = sb.toString();
                     }
@@ -177,18 +207,22 @@ public class Main {
                     int len = errorBody.getBytes().length;
 
                     bw.write("HTTP/1.0 404 Not Found\r\n");
+                    bw.write("Content-Type: text/html\r\n");
+                    bw.write("Content-Length: " + len + "\r\n");
                     bw.write("Connection: close\r\n");
                     bw.write("\r\n");
-                    bw.write("<html><body><h1>404 Not Found</h1></body></html>");
+                    bw.write(errorBody);
                     bw.flush();
-                    socket.close();
                     return;
                 }
 
-                // 5) Enviar respuesta según el MIME
+                // =========================
+                // 7) Responder según el tipo de archivo
+                // =========================
+
+                // (A) HTML: se envía como texto (BufferedWriter)
                 if (contentType.equals("text/html")) {
 
-                    // Leer HTML como texto
                     BufferedReader fileReader = new BufferedReader(new FileReader(file));
                     StringBuilder bodyBuilder = new StringBuilder();
                     String line;
@@ -200,7 +234,6 @@ public class Main {
                     String body = bodyBuilder.toString();
                     int contentLength = body.getBytes().length;
 
-                    // Responder HTML
                     bw.write("HTTP/1.0 200 OK\r\n");
                     bw.write("Content-Type: " + contentType + "\r\n");
                     bw.write("Content-Length: " + contentLength + "\r\n");
@@ -209,24 +242,25 @@ public class Main {
                     bw.write(body);
                     bw.flush();
 
-                } else if (contentType.equals("image/jpeg") || contentType.equals("image/gif")) {
+                }
+                // (B) Imágenes: se envían como bytes (OutputStream)
+                else if (contentType.equals("image/jpeg") || contentType.equals("image/gif")) {
 
-                    // Leer imagen como bytes
                     byte[] fileBytes = new byte[(int) file.length()];
                     FileInputStream fis = new FileInputStream(file);
                     int bytesRead = fis.read(fileBytes);
                     fis.close();
 
+                    // Si por alguna razón no se leyó nada
                     if (bytesRead == -1) {
                         bw.write("HTTP/1.0 500 Internal Server Error\r\n");
                         bw.write("Connection: close\r\n");
                         bw.write("\r\n");
                         bw.flush();
-                        socket.close();
                         return;
                     }
 
-                    // Enviar headers primero (texto)
+                    // Primero mandamos headers (texto)
                     bw.write("HTTP/1.0 200 OK\r\n");
                     bw.write("Content-Type: " + contentType + "\r\n");
                     bw.write("Content-Length: " + fileBytes.length + "\r\n");
@@ -234,23 +268,21 @@ public class Main {
                     bw.write("\r\n");
                     bw.flush();
 
-                    // Enviar body binario (bytes)
+                    // Luego mandamos el body binario (bytes)
                     os.write(fileBytes);
                     os.flush();
 
-                } else {
-                    // Extensión no soportada (opcional)
+                }
+                // (C) Otros tipos: no soportados explícitamente
+                else {
                     bw.write("HTTP/1.0 415 Unsupported Media Type\r\n");
                     bw.write("Connection: close\r\n");
                     bw.write("\r\n");
                     bw.flush();
                 }
 
-                socket.close();
-
-
-
             } catch (IOException e) {
+                // Si hay error con este cliente, no tumbamos el servidor
                 if (e.getMessage() != null && e.getMessage().toLowerCase().contains("socket closed")) {
                     return;
                 }
@@ -261,5 +293,7 @@ public class Main {
 
     // Pruebas:
     // - http://localhost:5001/
-    // - desde otro dispositivo en tu red: http://TU_IP:5001/
+    // - http://localhost:5001/test.jpg
+    // - http://localhost:5001/test.gif
+    // - http://localhost:5001/aaa.html
 }
