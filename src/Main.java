@@ -157,6 +157,25 @@ public class Main {
                 System.out.println("MIME   = " + contentType);
 
                 if (!file.exists() || file.isDirectory()) {
+
+                    File errorFile = new File("www/404.html");
+
+                    // Si el archivo 404.html existe, lo leemos; si no, usamos un fallback
+                    String errorBody = "<html><body><h1>404 Not Found</h1></body></html>";
+
+                    if (errorFile.exists() && !errorFile.isDirectory()) {
+                        BufferedReader fr = new BufferedReader(new FileReader(errorFile));
+                        StringBuilder sb = new StringBuilder();
+                        String l;
+                        while ((l = fr.readLine()) != null) {
+                            sb.append(l).append("\n");
+                        }
+                        fr.close();
+                        errorBody = sb.toString();
+                    }
+
+                    int len = errorBody.getBytes().length;
+
                     bw.write("HTTP/1.0 404 Not Found\r\n");
                     bw.write("Connection: close\r\n");
                     bw.write("\r\n");
