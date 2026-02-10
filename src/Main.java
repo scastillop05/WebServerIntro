@@ -81,65 +81,160 @@ public class Main {
 
         @Override
         public void run() {
-            // Este método corre dentro del hilo del cliente.
-            // Aquí va TODO lo que haces con el cliente: leer request y mandar response.
             try {
-
-                // 1) Obtenemos los "tubos" de comunicación con el cliente:
-                //    - InputStream  => lo que el cliente NOS ENVÍA (request)
-                //    - OutputStream => lo que nosotros le ENVIAMOS al cliente (response)
                 InputStream is = socket.getInputStream();
                 OutputStream os = socket.getOutputStream();
 
-                // 2) Convertimos los streams a lectura/escritura por texto:
-                //    - BufferedReader: leer líneas de texto (headers HTTP vienen en líneas)
-                //    - BufferedWriter: escribir texto (response HTTP)
                 BufferedReader br = new BufferedReader(new InputStreamReader(is));
                 BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(os));
 
-                // 3) "Conexión constante" del CLIENTE:
-                //    Este while(true) permite que el MISMO cliente haga varias peticiones
-                //    usando la misma conexión (si el navegador mantiene la conexión).
-                //
-                //    Nota: El navegador puede cerrar cuando quiera. Si la cierra, readLine() da null.
-                while (true) {
+                // 1) Leer request line (una sola solicitud)
+                String requestLine = br.readLine();
+                if (requestLine == null) {
+                    socket.close();
+                    return;
+                }
 
+                System.out.println("\n--- REQUEST START (" + socket.getInetAddress() + ") ---");
+                System.out.println(requestLine);
 
-                    String requestLine = br.readLine();
+                // 2) Leer y mostrar headers (hasta línea vacía)
+                String headerLine;
+                while ((headerLine = br.readLine()) != null && !headerLine.isEmpty()) {
+                    System.out.println(headerLine);
+                }
+                System.out.println("--- REQUEST END ---\n");
 
-                    if (requestLine == null) {
+                // 3) Parsear request line
+                String[] parts = requestLine.split(" ");
+                if (parts.length < 3) {
+                    bw.write("HTTP/1.0 400 Bad Request\r\n");
+                    bw.write("Connection: close\r\n");
+                    bw.write("\r\n");
+                    bw.flush();
+                    socket.close();
+                    return;
+                }
+
+                String method = parts[0];
+                String path = parts[1];
+                String version = parts[2];
+
+                if (!method.equals("GET")) {
+                    bw.write("HTTP/1.0 405 Method Not Allowed\r\n");
+                    bw.write("Connection: close\r\n");
+                    bw.write("\r\n");
+                    bw.flush();
+                    socket.close();
+                    return;
+                }
+
+                if (path.equals("/")) {
+                    path = "/index.html";
+                }
+
+                System.out.println("METHOD = " + method);
+                System.out.println("PATH   = " + path);
+                System.out.println("HTTP   = " + version);
+
+                // 4) Buscar archivo dentro de www
+                String filePath = "www" + path;
+                File file = new File(filePath);
+
+                // AQUÍ detectas el MIME
+                String contentType;
+
+                if (path.endsWith(".html") || path.endsWith(".htm")) {
+                    contentType = "text/html";
+                } else if (path.endsWith(".jpg") || path.endsWith(".jpeg")) {
+                    contentType = "image/jpeg";
+                } else if (path.endsWith(".gif")) {
+                    contentType = "image/gif";
+                } else {
+                    contentType = "application/octet-stream";
+                }
+
+                System.out.println("MIME   = " + contentType);
+
+                if (!file.exists() || file.isDirectory()) {
+                    bw.write("HTTP/1.0 404 Not Found\r\n");
+                    bw.write("Connection: close\r\n");
+                    bw.write("\r\n");
+                    bw.write("<html><body><h1>404 Not Found</h1></body></html>");
+                    bw.flush();
+                    socket.close();
+                    return;
+                }
+
+                // 5) Enviar respuesta según el MIME
+                if (contentType.equals("text/html")) {
+
+                    // Leer HTML como texto
+                    BufferedReader fileReader = new BufferedReader(new FileReader(file));
+                    StringBuilder bodyBuilder = new StringBuilder();
+                    String line;
+                    while ((line = fileReader.readLine()) != null) {
+                        bodyBuilder.append(line).append("\n");
+                    }
+                    fileReader.close();
+
+                    String body = bodyBuilder.toString();
+                    int contentLength = body.getBytes().length;
+
+                    // Responder HTML
+                    bw.write("HTTP/1.0 200 OK\r\n");
+                    bw.write("Content-Type: " + contentType + "\r\n");
+                    bw.write("Content-Length: " + contentLength + "\r\n");
+                    bw.write("Connection: close\r\n");
+                    bw.write("\r\n");
+                    bw.write(body);
+                    bw.flush();
+
+                } else if (contentType.equals("image/jpeg") || contentType.equals("image/gif")) {
+
+                    // Leer imagen como bytes
+                    byte[] fileBytes = new byte[(int) file.length()];
+                    FileInputStream fis = new FileInputStream(file);
+                    int bytesRead = fis.read(fileBytes);
+                    fis.close();
+
+                    if (bytesRead == -1) {
+                        bw.write("HTTP/1.0 500 Internal Server Error\r\n");
+                        bw.write("Connection: close\r\n");
+                        bw.write("\r\n");
+                        bw.flush();
                         socket.close();
                         return;
                     }
 
-                    System.out.println("\n--- REQUEST START (" + socket.getInetAddress() + ") ---");
-                    System.out.println(requestLine);
+                    // Enviar headers primero (texto)
+                    bw.write("HTTP/1.0 200 OK\r\n");
+                    bw.write("Content-Type: " + contentType + "\r\n");
+                    bw.write("Content-Length: " + fileBytes.length + "\r\n");
+                    bw.write("Connection: close\r\n");
+                    bw.write("\r\n");
+                    bw.flush();
 
+                    // Enviar body binario (bytes)
+                    os.write(fileBytes);
+                    os.flush();
 
-                    String headerLine;
-                    while ((headerLine = br.readLine()) != null && !headerLine.isEmpty()) {
-                        System.out.println(headerLine);
-                    }
-                    System.out.println("--- REQUEST END ---\n");
-
-                    String body = "<html><body>Hola Mundo</body></html>";
-                    int contentLength = body.getBytes().length;
-
-                    bw.write("HTTP/1.1 200 OK\r\n");                     // línea de estado
-                    bw.write("Content-type: text/html\r\n");            // tipo de contenido
-                    bw.write("Content-Length: " + contentLength + "\r\n"); // tamaño del body
-                    bw.write("Connection: close\r\n");             // le decimos: mantén conexión
-                    bw.write("\r\n");                                   // línea vacía: fin headers
-                    bw.write(body);                                     // body HTML
-                    bw.flush();                                         // IMPORTANTÍSIMO: envía todo
-
-                    socket.close();
+                } else {
+                    // Extensión no soportada (opcional)
+                    bw.write("HTTP/1.0 415 Unsupported Media Type\r\n");
+                    bw.write("Connection: close\r\n");
+                    bw.write("\r\n");
+                    bw.flush();
                 }
+
+                socket.close();
 
 
 
             } catch (IOException e) {
-                // Si hay error con ESE cliente, no tumbamos el servidor completo.
+                if (e.getMessage() != null && e.getMessage().toLowerCase().contains("socket closed")) {
+                    return;
+                }
                 System.out.println("Error with client " + socket.getInetAddress() + ": " + e.getMessage());
             }
         }
